@@ -136,3 +136,17 @@ function killC(id){if(C[id]){C[id].destroy();delete C[id];}}
 const GC='rgba(255,255,255,0.05)',TC='rgba(255,255,255,0.25)',MF={family:'Inter',size:10};
 function bc(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:TC,font:MF},border:{display:false}},y:{grid:{color:GC},ticks:{color:TC,font:MF},border:{display:false}}}};}
 loadAll();setInterval(loadAll,60000);
+
+// expose functions to global scope for onclick handlers
+window.go = go;
+window.toggleNotif = toggleNotif;
+window.toggleSettings = toggleSettings;
+window.toggleKbd = toggleKbd;
+window.exportReport = exportReport;
+window.clearData = clearData;
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.saveLimit = saveLimit;
+window.tFocus = tFocus;
+window.renderRules = renderRules;
+window.filterCat = filterCat;
