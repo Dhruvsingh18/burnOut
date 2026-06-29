@@ -1,13 +1,8 @@
 """
 Screen Time Agent — polls the active window every 60 seconds,
 batches samples, and POSTs them to the backend.
-
-Windows: uses native Win32 API via ctypes + psutil for reliable
-         process-name detection. No third-party window library needed.
-macOS:   uses pywinctl + subprocess for idle time.
-Linux:   uses pywinctl + xprintidle.
 """
-import os, sys, time, logging, ctypes
+import os, sys, time, logging, ctypes, threading
 from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
@@ -20,38 +15,40 @@ logging.basicConfig(
 )
 log = logging.getLogger("agent")
 
-BACKEND     = os.getenv("BACKEND_URL",            "http://localhost:8000")
+BACKEND     = "https://burnout-n9p9.onrender.com"
 SAMPLE_SECS = int(os.getenv("SAMPLE_INTERVAL_SECONDS", 60))
-FLUSH_MINS  = int(os.getenv("FLUSH_INTERVAL_MINUTES",   5))
+FLUSH_MINS  = int(os.getenv("FLUSH_INTERVAL_MINUTES",   1))
 IDLE_THRESH = int(os.getenv("IDLE_THRESHOLD_SECONDS",  30))
 
 
-# ── platform helpers ─────────────────────────────────────────────────────
+def keep_alive():
+    """Ping backend every 10 minutes so Render never sleeps."""
+    while True:
+        try:
+            requests.get(BACKEND, timeout=5)
+            log.info("Keep-alive ping sent")
+        except Exception:
+            pass
+        time.sleep(600)
+
 
 def _win_active_window():
-    """Return (app_name, window_title) using pure Win32 + psutil."""
     try:
         import psutil
         hwnd = ctypes.windll.user32.GetForegroundWindow()
-
-        # window title
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         buf    = ctypes.create_unicode_buffer(length + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
         title = buf.value
-
-        # process name from PID
         pid = ctypes.c_ulong()
         ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         try:
             proc     = psutil.Process(pid.value)
-            exe_name = proc.name()                 # e.g. "Code.exe"
+            exe_name = proc.name()
             app      = exe_name.replace(".exe", "").replace(".app", "")
-            # For browsers, use the title suffix which is more descriptive
             if app.lower() in ("chrome", "msedge", "firefox", "brave", "opera"):
                 if " - " in title:
                     app = title.split(" - ")[-1].strip()
-            # For editors, prefer the exe name (already clean)
         except Exception:
             app = title.split(" - ")[-1].strip() if " - " in title else title
         return app[:80], title[:200]
@@ -61,7 +58,6 @@ def _win_active_window():
 
 
 def _cross_active_window():
-    """Fallback using pywinctl for macOS / Linux."""
     try:
         import pywinctl as pw
         win = pw.getActiveWindow()
@@ -107,8 +103,6 @@ def get_idle_seconds() -> float:
     return 0.0
 
 
-# ── main loop ────────────────────────────────────────────────────────────
-
 def sample() -> dict:
     app, title = get_active_window()
     idle       = get_idle_seconds()
@@ -128,7 +122,7 @@ def flush(buffer: list) -> None:
         r = requests.post(
             f"{BACKEND}/api/events",
             json={"events": buffer},
-            timeout=10,
+            timeout=30,
         )
         r.raise_for_status()
         active = sum(1 for e in buffer if e["idle_seconds"] < IDLE_THRESH)
@@ -141,25 +135,31 @@ def run() -> None:
     log.info("Screen time agent started  →  %s", BACKEND)
     log.info("Sampling every %ds, flushing every %dm", SAMPLE_SECS, FLUSH_MINS)
 
-    # quick connectivity check
-    try:
-        requests.get(BACKEND, timeout=3)
-        log.info("Backend reachable ✓")
-    except Exception:
-        log.warning("Backend unreachable — samples will be buffered until it comes up")
+    # start keep-alive thread
+    threading.Thread(target=keep_alive, daemon=True).start()
+    log.info("Keep-alive thread started")
+
+    # wake up Render with longer timeout
+    log.info("Waking up backend (may take 60s on free tier)...")
+    for attempt in range(6):
+        try:
+            requests.get(BACKEND, timeout=30)
+            log.info("Backend reachable ✓")
+            break
+        except Exception:
+            log.info("Waiting for backend... attempt %d/6", attempt + 1)
+            time.sleep(15)
 
     buf        = []
     last_flush = time.monotonic()
 
     while True:
         buf.append(sample())
-
         elapsed = time.monotonic() - last_flush
         if elapsed >= FLUSH_MINS * 60:
             flush(buf)
             buf        = []
             last_flush = time.monotonic()
-
         time.sleep(SAMPLE_SECS)
 
 
