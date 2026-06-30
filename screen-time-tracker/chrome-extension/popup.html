@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  body { font-family: -apple-system, sans-serif; width: 240px; padding: 16px; background: #08090E; color: #F1F3F9; margin: 0; }
+  h3 { font-size: 14px; font-weight: 700; margin: 0 0 4px; color: #9F93FF; }
+  p { font-size: 12px; color: #8B90A7; margin: 0 0 14px; line-height: 1.5; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 12px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #00D4A0; box-shadow: 0 0 0 2px rgba(0,212,160,.2); }
+  .dot.off { background: #FF5C5C; box-shadow: 0 0 0 2px rgba(255,92,92,.2); }
+  button { width: 100%; padding: 8px; background: rgba(124,111,255,.15); border: 1px solid rgba(124,111,255,.3); color: #9F93FF; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  button:hover { background: rgba(124,111,255,.25); }
+  .divider { height: 1px; background: rgba(255,255,255,.07); margin: 12px 0; }
+</style>
+</head>
+<body>
+  <h3>Burnout Tracker</h3>
+  <p>Monitoring your tabs and sending data to your dashboard.</p>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">Checking connection...</span>
+  </div>
+  <div class="divider"></div>
+  <p id="tab-count" style="margin-bottom:12px">Scanning tabs...</p>
+  <button onclick="sendNow()">Send tabs now</button>
+
+<script>
+const BACKEND = "https://burnout-n9p9.onrender.com";
+
+async function checkStatus() {
+  try {
+    const r = await fetch(`${BACKEND}/`);
+    if (r.ok) {
+      document.getElementById("dot").className = "dot";
+      document.getElementById("status-text").textContent = "Connected to backend";
+    }
+  } catch {
+    document.getElementById("dot").className = "dot off";
+    document.getElementById("status-text").textContent = "Backend unreachable";
+  }
+}
+
+async function countTabs() {
+  const tabs = await chrome.tabs.query({});
+  const valid = tabs.filter(t => t.url && !t.url.startsWith("chrome://"));
+  document.getElementById("tab-count").textContent = `${valid.length} tabs open across ${new Set(tabs.map(t=>t.windowId)).size} window(s)`;
+}
+
+async function sendNow() {
+  const tabs = await chrome.tabs.query({});
+  const payload = tabs
+    .filter(t => t.url && !t.url.startsWith("chrome://"))
+    .map(t => ({ url: t.url, title: t.title || "", active: t.active }));
+  try {
+    await fetch(`${BACKEND}/api/chrome-tabs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tabs: payload }),
+    });
+    document.getElementById("status-text").textContent = `Sent ${payload.length} tabs!`;
+  } catch {
+    document.getElementById("status-text").textContent = "Failed to send";
+  }
+}
+
+checkStatus();
+countTabs();
+</script>
+</body>
+</html>
