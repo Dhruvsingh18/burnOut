@@ -1,8 +1,9 @@
 """
 Screen Time Agent — polls the active window every 60 seconds,
 batches samples, and POSTs them to the backend.
+Saves buffer to disk so no data is lost if the computer shuts down.
 """
-import os, sys, time, logging, ctypes, threading
+import os, sys, time, logging, ctypes, threading, json
 from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
@@ -19,7 +20,43 @@ BACKEND     = "https://burnout-n9p9.onrender.com"
 SAMPLE_SECS = int(os.getenv("SAMPLE_INTERVAL_SECONDS", 60))
 FLUSH_MINS  = int(os.getenv("FLUSH_INTERVAL_MINUTES",   1))
 IDLE_THRESH = int(os.getenv("IDLE_THRESHOLD_SECONDS",  30))
+BUFFER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "buffer.json")
 
+
+# ── buffer persistence ────────────────────────────────────────────────────────
+
+def save_buffer(buffer: list) -> None:
+    """Write buffer to disk so it survives shutdowns."""
+    try:
+        with open(BUFFER_FILE, "w") as f:
+            json.dump(buffer, f)
+    except Exception as exc:
+        log.debug("Could not save buffer: %s", exc)
+
+
+def load_buffer() -> list:
+    """Load any unsent events from a previous session."""
+    try:
+        if os.path.exists(BUFFER_FILE):
+            with open(BUFFER_FILE, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list) and len(data) > 0:
+                log.info("Found %d unsent events from previous session", len(data))
+                return data
+    except Exception as exc:
+        log.debug("Could not load buffer: %s", exc)
+    return []
+
+
+def clear_buffer() -> None:
+    try:
+        with open(BUFFER_FILE, "w") as f:
+            json.dump([], f)
+    except Exception:
+        pass
+
+
+# ── keep-alive ────────────────────────────────────────────────────────────────
 
 def keep_alive():
     """Ping backend every 10 minutes so Render never sleeps."""
@@ -31,6 +68,8 @@ def keep_alive():
             pass
         time.sleep(600)
 
+
+# ── platform helpers ──────────────────────────────────────────────────────────
 
 def _win_active_window():
     try:
@@ -103,6 +142,8 @@ def get_idle_seconds() -> float:
     return 0.0
 
 
+# ── sample + flush ────────────────────────────────────────────────────────────
+
 def sample() -> dict:
     app, title = get_active_window()
     idle       = get_idle_seconds()
@@ -115,9 +156,10 @@ def sample() -> dict:
     }
 
 
-def flush(buffer: list) -> None:
+def flush(buffer: list) -> bool:
+    """Send buffer to backend. Returns True on success."""
     if not buffer:
-        return
+        return True
     try:
         r = requests.post(
             f"{BACKEND}/api/events",
@@ -126,10 +168,14 @@ def flush(buffer: list) -> None:
         )
         r.raise_for_status()
         active = sum(1 for e in buffer if e["idle_seconds"] < IDLE_THRESH)
-        log.info("Sent %d events (%d active, %d idle)", len(buffer), active, len(buffer)-active)
+        log.info("Sent %d events (%d active, %d idle)", len(buffer), active, len(buffer) - active)
+        return True
     except requests.RequestException as exc:
-        log.warning("Failed to send batch — will retry: %s", exc)
+        log.warning("Failed to send batch — will retry next cycle: %s", exc)
+        return False
 
+
+# ── main loop ─────────────────────────────────────────────────────────────────
 
 def run() -> None:
     log.info("Screen time agent started  →  %s", BACKEND)
@@ -150,16 +196,31 @@ def run() -> None:
             log.info("Waiting for backend... attempt %d/6", attempt + 1)
             time.sleep(15)
 
-    buf        = []
+    # load any unsent events from previous session (survives shutdown)
+    buf = load_buffer()
+    if buf:
+        log.info("Sending %d recovered events from last session...", len(buf))
+        if flush(buf):
+            clear_buffer()
+            buf = []
+        # if flush failed, keep them in buf and retry next cycle
+
     last_flush = time.monotonic()
 
     while True:
         buf.append(sample())
+
+        # save to disk every sample — survives any shutdown
+        save_buffer(buf)
+
         elapsed = time.monotonic() - last_flush
         if elapsed >= FLUSH_MINS * 60:
-            flush(buf)
-            buf        = []
+            if flush(buf):
+                buf = []
+                clear_buffer()
+            # if flush failed, keep buf and retry next minute
             last_flush = time.monotonic()
+
         time.sleep(SAMPLE_SECS)
 
 
