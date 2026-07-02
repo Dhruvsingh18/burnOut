@@ -1,7 +1,7 @@
 """
-Screen Time Agent — polls the active window every 60 seconds,
-batches samples, and POSTs them to the backend.
-Saves buffer to disk so no data is lost if the computer shuts down.
+Screen Time Agent — sends every sample immediately to the backend.
+No batching = no data loss on shutdown. Each 60-second sample is
+written to the database the moment it is collected.
 """
 import os, sys, time, logging, ctypes, threading, json
 from datetime import datetime, timezone
@@ -18,37 +18,32 @@ log = logging.getLogger("agent")
 
 BACKEND     = "https://burnout-n9p9.onrender.com"
 SAMPLE_SECS = int(os.getenv("SAMPLE_INTERVAL_SECONDS", 60))
-FLUSH_MINS  = int(os.getenv("FLUSH_INTERVAL_MINUTES",   1))
 IDLE_THRESH = int(os.getenv("IDLE_THRESHOLD_SECONDS",  30))
 BUFFER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "buffer.json")
 
 
-# ── buffer persistence ────────────────────────────────────────────────────────
+# ── disk buffer — only used when backend is unreachable ───────────────────────
 
-def save_buffer(buffer: list) -> None:
-    """Write buffer to disk so it survives shutdowns."""
+def save_buffer(buf):
     try:
         with open(BUFFER_FILE, "w") as f:
-            json.dump(buffer, f)
-    except Exception as exc:
-        log.debug("Could not save buffer: %s", exc)
+            json.dump(buf, f)
+    except Exception:
+        pass
 
-
-def load_buffer() -> list:
-    """Load any unsent events from a previous session."""
+def load_buffer():
     try:
         if os.path.exists(BUFFER_FILE):
             with open(BUFFER_FILE, "r") as f:
                 data = json.load(f)
-            if isinstance(data, list) and len(data) > 0:
-                log.info("Found %d unsent events from previous session", len(data))
+            if isinstance(data, list) and data:
+                log.info("Recovered %d unsent events from last session", len(data))
                 return data
-    except Exception as exc:
-        log.debug("Could not load buffer: %s", exc)
+    except Exception:
+        pass
     return []
 
-
-def clear_buffer() -> None:
+def clear_buffer():
     try:
         with open(BUFFER_FILE, "w") as f:
             json.dump([], f)
@@ -59,11 +54,9 @@ def clear_buffer() -> None:
 # ── keep-alive ────────────────────────────────────────────────────────────────
 
 def keep_alive():
-    """Ping backend every 10 minutes so Render never sleeps."""
     while True:
         try:
             requests.get(BACKEND, timeout=5)
-            log.info("Keep-alive ping sent")
         except Exception:
             pass
         time.sleep(600)
@@ -74,12 +67,12 @@ def keep_alive():
 def _win_active_window():
     try:
         import psutil
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        hwnd   = ctypes.windll.user32.GetForegroundWindow()
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         buf    = ctypes.create_unicode_buffer(length + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
-        title = buf.value
-        pid = ctypes.c_ulong()
+        title  = buf.value
+        pid    = ctypes.c_ulong()
         ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         try:
             proc     = psutil.Process(pid.value)
@@ -142,84 +135,86 @@ def get_idle_seconds() -> float:
     return 0.0
 
 
-# ── sample + flush ────────────────────────────────────────────────────────────
+# ── send ──────────────────────────────────────────────────────────────────────
 
-def sample() -> dict:
-    app, title = get_active_window()
-    idle       = get_idle_seconds()
-    return {
-        "timestamp":        datetime.now(timezone.utc).isoformat(),
-        "app_name":         app,
-        "window_title":     title,
-        "idle_seconds":     round(idle, 1),
-        "duration_seconds": SAMPLE_SECS,
-    }
-
-
-def flush(buffer: list) -> bool:
-    """Send buffer to backend. Returns True on success."""
-    if not buffer:
+def send(events: list) -> bool:
+    """Send a list of events. Returns True on success."""
+    if not events:
         return True
     try:
         r = requests.post(
             f"{BACKEND}/api/events",
-            json={"events": buffer},
-            timeout=30,
+            json={"events": events},
+            timeout=15,
         )
         r.raise_for_status()
-        active = sum(1 for e in buffer if e["idle_seconds"] < IDLE_THRESH)
-        log.info("Sent %d events (%d active, %d idle)", len(buffer), active, len(buffer) - active)
         return True
     except requests.RequestException as exc:
-        log.warning("Failed to send batch — will retry next cycle: %s", exc)
+        log.warning("Send failed — buffering to disk: %s", exc)
         return False
 
 
 # ── main loop ─────────────────────────────────────────────────────────────────
 
-def run() -> None:
+def run():
     log.info("Screen time agent started  →  %s", BACKEND)
-    log.info("Sampling every %ds, flushing every %dm", SAMPLE_SECS, FLUSH_MINS)
+    log.info("Sending every sample immediately — no data lost on shutdown")
 
-    # start keep-alive thread
+    # keep Render awake
     threading.Thread(target=keep_alive, daemon=True).start()
-    log.info("Keep-alive thread started")
 
-    # wake up Render with longer timeout
-    log.info("Waking up backend (may take 60s on free tier)...")
+    # wake up Render
+    log.info("Waking up backend...")
     for attempt in range(6):
         try:
             requests.get(BACKEND, timeout=30)
-            log.info("Backend reachable ✓")
+            log.info("Backend reachable")
             break
         except Exception:
-            log.info("Waiting for backend... attempt %d/6", attempt + 1)
+            log.info("Waiting... attempt %d/6", attempt + 1)
             time.sleep(15)
 
-    # load any unsent events from previous session (survives shutdown)
-    buf = load_buffer()
-    if buf:
-        log.info("Sending %d recovered events from last session...", len(buf))
-        if flush(buf):
+    # send any events buffered from previous session
+    pending = load_buffer()
+    if pending:
+        log.info("Sending %d recovered events from last session...", len(pending))
+        if send(pending):
+            log.info("Recovered events sent successfully")
             clear_buffer()
-            buf = []
-        # if flush failed, keep them in buf and retry next cycle
+        else:
+            log.warning("Could not send recovered events — will retry next startup")
 
-    last_flush = time.monotonic()
+    # offline buffer for current session
+    offline_buf = []
 
     while True:
-        buf.append(sample())
+        app, title = get_active_window()
+        idle       = get_idle_seconds()
 
-        # save to disk every sample — survives any shutdown
-        save_buffer(buf)
+        event = {
+            "timestamp":        datetime.now(timezone.utc).isoformat(),
+            "app_name":         app,
+            "window_title":     title,
+            "idle_seconds":     round(idle, 1),
+            "duration_seconds": SAMPLE_SECS,
+        }
 
-        elapsed = time.monotonic() - last_flush
-        if elapsed >= FLUSH_MINS * 60:
-            if flush(buf):
-                buf = []
-                clear_buffer()
-            # if flush failed, keep buf and retry next minute
-            last_flush = time.monotonic()
+        # try to send immediately
+        if send([event]):
+            # if we had offline events, try to flush them too
+            if offline_buf:
+                if send(offline_buf):
+                    log.info("Flushed %d offline events", len(offline_buf))
+                    offline_buf = []
+                    clear_buffer()
+        else:
+            # backend unreachable — save to disk
+            offline_buf.append(event)
+            save_buffer(offline_buf)
+            log.info("Offline — buffered %d events to disk", len(offline_buf))
+
+        active = "active" if idle < IDLE_THRESH else "idle"
+        log.info("Sampled: %s (%s) — %s", app or "Unknown", active, "sent" if not offline_buf else f"offline ({len(offline_buf)} buffered)")
 
         time.sleep(SAMPLE_SECS)
 
