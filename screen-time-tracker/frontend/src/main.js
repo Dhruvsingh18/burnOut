@@ -1,4 +1,4 @@
-const API='http://localhost:8000';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const COLORS={'VS Code':'#7C6FFF','Cursor':'#6366F1','Chrome':'#F59E0B','Firefox':'#F97316','Edge':'#0EA5E9','Safari':'#06B6D4','Brave':'#FB7185','Terminal':'#00D4A0','PowerShell':'#6366F1','Slack':'#8B5CF6','Discord':'#7C3AED','Teams':'#3B82F6','Zoom':'#2563EB','Figma':'#EC4899','Photoshop':'#38BDF8','Illustrator':'#F59E0B','Spotify':'#1DB954','YouTube':'#FF5C5C','Netflix':'#DC2626','Twitch':'#9146FF','Reddit':'#FF6314','Twitter':'#1DA1F2','Notion':'#AAAAAA','Obsidian':'#7C3AED','PyCharm':'#00D4A0','IntelliJ':'#FF5C5C','Excel':'#21A366','Word':'#2B579A'};
 const col=n=>COLORS[n]||'#8B90A7';
 const ini=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
@@ -113,15 +113,6 @@ function openModal(name){
   const lbls=Array.from({length:24},(_,i)=>i%6===0?(i<12?`${i||12}am`:`${i===12?12:i-12}pm`):'');
   C['mchart']=new Chart(document.getElementById('mchart'),{type:'bar',data:{labels:lbls,datasets:[{data:a.hourly||Array(24).fill(0),backgroundColor:col(a.app_name)+'bb',borderRadius:3,barThickness:14}]},options:{...bc(),scales:{x:{...bc().scales.x},y:{display:false}}}});
   document.getElementById('mbg').classList.add('open');
-  // load chrome analysis if this is a browser app
-  const BROWSERS = ['Chrome','Firefox','Edge','Safari','Brave','Opera'];
-  const cpanel = document.getElementById('chrome-panel');
-  if (BROWSERS.includes(name)) {
-    cpanel.style.display = 'block';
-    loadChromeAnalysis();
-  } else {
-    cpanel.style.display = 'none';
-  }
 }
 function closeModal(){document.getElementById('mbg').classList.remove('open');killC('mchart');}
 async function saveLimit(){
@@ -133,8 +124,8 @@ si.addEventListener('input',()=>{const q=si.value.trim().toLowerCase();if(!q){sr
 si.addEventListener('keydown',e=>{if(e.key==='Escape'){si.value='';sr.classList.remove('open');si.blur();}});
 document.addEventListener('click',e=>{if(!si.contains(e.target)&&!sr.contains(e.target))sr.classList.remove('open');});
 const nb=[...document.querySelectorAll('.ni')];
-document.addEventListener('keydown',e=>{if(e.target===si)return;const m={'1':0,'2':1,'3':2,'4':3,'5':4,'6':5};if(m[e.key]!==undefined){nb[m[e.key]]?.click();return;}if(e.key==='/')  {e.preventDefault();si.focus();}if(e.key==='Escape'){closeModal();document.getElementById('npanel').classList.remove('open');document.getElementById('spanel').classList.remove('open');document.getElementById('kh').classList.remove('show');}if(e.key==='?')toggleKbd();});
-function go(n,b){document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));document.getElementById('p-'+n).classList.add('active');document.querySelectorAll('.ni').forEach(x=>x.classList.remove('active'));b.classList.add('active');if(n==='chrome')loadChromeFullPage();}
+document.addEventListener('keydown',e=>{if(e.target===si)return;const m={'1':0,'2':1,'3':2,'4':3,'5':4};if(m[e.key]!==undefined){nb[m[e.key]]?.click();return;}if(e.key==='/')  {e.preventDefault();si.focus();}if(e.key==='Escape'){closeModal();document.getElementById('npanel').classList.remove('open');document.getElementById('spanel').classList.remove('open');document.getElementById('kh').classList.remove('show');}if(e.key==='?')toggleKbd();});
+function go(n,b){document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));document.getElementById('p-'+n).classList.add('active');document.querySelectorAll('.ni').forEach(x=>x.classList.remove('active'));b.classList.add('active');}
 function toggleNotif(){document.getElementById('npanel').classList.toggle('open');document.getElementById('spanel').classList.remove('open');}
 function toggleSettings(){document.getElementById('spanel').classList.toggle('open');document.getElementById('npanel').classList.remove('open');}
 function toggleKbd(){document.getElementById('kh').classList.toggle('show');}
@@ -144,161 +135,8 @@ function clearData(){if(confirm('Clear all data? Cannot be undone.'))toast('Data
 function killC(id){if(C[id]){C[id].destroy();delete C[id];}}
 const GC='rgba(255,255,255,0.05)',TC='rgba(255,255,255,0.25)',MF={family:'Inter',size:10};
 function bc(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:TC,font:MF},border:{display:false}},y:{grid:{color:GC},ticks:{color:TC,font:MF},border:{display:false}}}};}
+loadAll();setInterval(loadAll,60000);
 
-// ── Chrome tab analysis ────────────────────────────────────────────────────
-async function loadChromeAnalysis() {
-  try {
-    const r = await fetch(`${API}/api/chrome-analysis`);
-    const data = await r.json();
-    renderChromePanel(data);
-  } catch(e) {
-    console.warn('Chrome analysis unavailable');
-  }
-}
-
-function renderChromePanel(data) {
-  const el = document.getElementById('chrome-panel');
-  if (!el) return;
-
-  const s = data.summary;
-  const total = s.total_minutes || 0;
-  const prodPct = s.productive_pct || 0;
-  const unprodPct = total > 0 ? Math.round(s.unproductive_minutes / total * 100) : 0;
-  const neutPct = 100 - prodPct - unprodPct;
-
-  const catColor = c => c === 'productive' ? '#00D4A0' : c === 'unproductive' ? '#FF5C5C' : c === 'neutral' ? '#FFB020' : '#8B90A7';
-  const catLabel = c => c === 'productive' ? 'Productive' : c === 'unproductive' ? 'Unproductive' : c === 'neutral' ? 'Neutral' : 'Other';
-
-  const sites = data.title_analysis.slice(0, 8);
-  const maxMins = Math.max(...sites.map(s => s.minutes), 1);
-
-  el.innerHTML = `
-    <div style="border-top:1px solid rgba(255,255,255,0.07);margin-top:16px;padding-top:16px">
-      <div style="font-size:10px;font-weight:700;color:#4A4F66;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">
-        Chrome Tab Analysis
-        ${data.extension_installed
-          ? '<span style="background:rgba(0,212,160,.15);color:#00D4A0;padding:2px 8px;border-radius:10px;margin-left:8px;font-size:9px">EXTENSION ACTIVE</span>'
-          : '<span style="background:rgba(255,255,255,.06);color:#8B90A7;padding:2px 8px;border-radius:10px;margin-left:8px;font-size:9px">TITLE ANALYSIS ONLY</span>'}
-      </div>
-
-      ${total > 0 ? `
-      <div style="display:flex;gap:10px;margin-bottom:14px">
-        <div style="flex:1;background:rgba(0,212,160,.08);border:1px solid rgba(0,212,160,.2);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:20px;font-weight:700;color:#00D4A0">${prodPct}%</div>
-          <div style="font-size:10px;color:#8B90A7;margin-top:2px">Productive</div>
-        </div>
-        <div style="flex:1;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.2);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:20px;font-weight:700;color:#FF5C5C">${unprodPct}%</div>
-          <div style="font-size:10px;color:#8B90A7;margin-top:2px">Unproductive</div>
-        </div>
-        <div style="flex:1;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:20px;font-weight:700;color:#FFB020">${neutPct}%</div>
-          <div style="font-size:10px;color:#8B90A7;margin-top:2px">Neutral</div>
-        </div>
-      </div>` : '<div style="font-size:13px;color:#8B90A7;margin-bottom:12px">No Chrome data yet today.</div>'}
-
-      ${sites.length > 0 ? `
-      <div style="font-size:10px;font-weight:700;color:#4A4F66;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Sites visited today</div>
-      ${sites.map(s => `
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04)">
-          <div style="width:8px;height:8px;border-radius:50%;background:${catColor(s.category)};flex-shrink:0"></div>
-          <span style="font-size:12px;flex:1;color:#F1F3F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.site}</span>
-          <div style="flex:1;height:3px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${Math.round(s.minutes/maxMins*100)}%;background:${catColor(s.category)};border-radius:3px"></div>
-          </div>
-          <span style="font-size:11px;font-weight:600;color:${catColor(s.category)};min-width:36px;text-align:right">${s.minutes}m</span>
-        </div>`).join('')}
-      ` : ''}
-
-      ${!data.extension_installed ? `
-      <div style="margin-top:14px;padding:12px;background:rgba(124,111,255,.08);border:1px solid rgba(124,111,255,.2);border-radius:10px">
-        <div style="font-size:12px;font-weight:600;color:#9F93FF;margin-bottom:4px">Install the Chrome extension for full tab tracking</div>
-        <div style="font-size:11px;color:#8B90A7;line-height:1.5">Currently using window title analysis only. Install the extension from your project's <code style="color:#9F93FF">chrome-extension/</code> folder to track all open tabs, not just the active one.</div>
-      </div>` : ''}
-    </div>`;
-}
-
-
-function renderChromeFullPanel(data) {
-  const el = document.getElementById('chrome-full-panel');
-  if (!el) return;
-
-  const s = data.summary;
-  const total = s.total_minutes || 0;
-  const prodPct = s.productive_pct || 0;
-  const unprodPct = total > 0 ? Math.round(s.unproductive_minutes / total * 100) : 0;
-  const neutPct = Math.max(0, 100 - prodPct - unprodPct);
-
-  const catColor = c => c==='productive'?'#00D4A0':c==='unproductive'?'#FF5C5C':c==='neutral'?'#FFB020':'#8B90A7';
-  const catLabel = c => c==='productive'?'Productive':c==='unproductive'?'Unproductive':c==='neutral'?'Neutral':'Other';
-
-  const sites = data.title_analysis.slice(0, 12);
-  const maxMins = Math.max(...sites.map(s=>s.minutes), 1);
-
-  const extBadge = data.extension_installed
-    ? '<span style="background:rgba(0,212,160,.15);color:#00D4A0;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600">Extension active</span>'
-    : '<span style="background:rgba(255,255,255,.06);color:#8B90A7;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600">Title analysis only</span>';
-
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
-      ${extBadge}
-      ${!data.extension_installed ? '<span style="font-size:12px;color:var(--tx2)">Install the Chrome extension from the <code style="color:var(--vi2)">chrome-extension/</code> folder for full tab tracking</span>' : ''}
-    </div>
-
-    ${total > 0 ? `
-    <div class="s3" style="margin-bottom:20px">
-      <div class="sc"><div class="sca" style="background:#00D4A0"></div>
-        <div class="sv" style="color:#00D4A0">${prodPct}%</div>
-        <div class="sl">Productive</div>
-        <div style="font-size:12px;color:var(--tx2);margin-top:6px">${s.productive_minutes}m</div>
-      </div>
-      <div class="sc"><div class="sca" style="background:#FF5C5C"></div>
-        <div class="sv" style="color:#FF5C5C">${unprodPct}%</div>
-        <div class="sl">Unproductive</div>
-        <div style="font-size:12px;color:var(--tx2);margin-top:6px">${s.unproductive_minutes}m</div>
-      </div>
-      <div class="sc"><div class="sca" style="background:#FFB020"></div>
-        <div class="sv" style="color:#FFB020">${neutPct}%</div>
-        <div class="sl">Neutral</div>
-        <div style="font-size:12px;color:var(--tx2);margin-top:6px">${s.neutral_minutes}m</div>
-      </div>
-    </div>
-
-    <div style="height:8px;background:rgba(255,255,255,.06);border-radius:8px;overflow:hidden;display:flex;margin-bottom:24px">
-      <div style="width:${prodPct}%;background:#00D4A0;transition:width .8s ease"></div>
-      <div style="width:${unprodPct}%;background:#FF5C5C;transition:width .8s ease"></div>
-      <div style="width:${neutPct}%;background:#FFB020;transition:width .8s ease"></div>
-    </div>` : `<div style="font-size:13px;color:var(--tx2);margin-bottom:20px;padding:20px;background:var(--card);border-radius:12px;border:1px solid var(--border)">No Chrome data yet today. Make sure the agent is running and Chrome is open.</div>`}
-
-    <div class="sh" style="margin-bottom:14px">Sites visited today</div>
-    ${sites.length > 0 ? `
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden">
-      ${sites.map((s,i) => `
-        <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:${i<sites.length-1?'1px solid rgba(255,255,255,.04)':'none'}">
-          <div style="width:10px;height:10px;border-radius:50%;background:${catColor(s.category)};flex-shrink:0;box-shadow:0 0 0 3px ${catColor(s.category)}22"></div>
-          <span style="font-size:13px;font-weight:600;flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.site}</span>
-          <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:8px;background:${catColor(s.category)}18;color:${catColor(s.category)};white-space:nowrap">${catLabel(s.category)}</span>
-          <div style="width:100px;height:4px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden;flex-shrink:0">
-            <div style="height:100%;width:${Math.round(s.minutes/maxMins*100)}%;background:${catColor(s.category)};border-radius:4px"></div>
-          </div>
-          <span style="font-size:12px;font-weight:700;color:${catColor(s.category)};min-width:36px;text-align:right">${s.minutes}m</span>
-        </div>`).join('')}
-    </div>` : '<div style="font-size:13px;color:var(--tx2)">No sites identified yet.</div>'}`;
-}
-
-async function loadChromeFullPage() {
-  try {
-    const r = await fetch(`${API}/api/chrome-analysis`);
-    const data = await r.json();
-    renderChromeFullPanel(data);
-    renderChromePanel(data); // also update modal panel
-  } catch(e) {
-    const el = document.getElementById('chrome-full-panel');
-    if (el) el.innerHTML = '<div class="es"><div class="es-title">Chrome analysis unavailable</div><div class="es-sub">Make sure the backend is running with the latest main.py deployed.</div></div>';
-  }
-}
-
-loadAll();setInterval(loadAll,60000);loadChromeAnalysis();setInterval(loadChromeAnalysis,60000);
 // expose functions to global scope for onclick handlers
 window.go = go;
 window.toggleNotif = toggleNotif;
