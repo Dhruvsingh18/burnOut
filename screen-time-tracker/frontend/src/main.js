@@ -1,4 +1,3 @@
-
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const COLORS={'VS Code':'#7C6FFF','Cursor':'#6366F1','Chrome':'#F59E0B','Firefox':'#F97316','Edge':'#0EA5E9','Safari':'#06B6D4','Brave':'#FB7185','Terminal':'#00D4A0','PowerShell':'#6366F1','Slack':'#8B5CF6','Discord':'#7C3AED','Teams':'#3B82F6','Zoom':'#2563EB','Figma':'#EC4899','Photoshop':'#38BDF8','Illustrator':'#F59E0B','Spotify':'#1DB954','YouTube':'#FF5C5C','Netflix':'#DC2626','Twitch':'#9146FF','Reddit':'#FF6314','Twitter':'#1DA1F2','Notion':'#AAAAAA','Obsidian':'#7C3AED','PyCharm':'#00D4A0','IntelliJ':'#FF5C5C','Excel':'#21A366','Word':'#2B579A'};
 const col=n=>COLORS[n]||'#8B90A7';
