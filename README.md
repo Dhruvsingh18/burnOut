@@ -39,6 +39,3 @@ Backend API: [burnout-n9p9.onrender.com](https://burnout-n9p9.onrender.com/docs)
 ## Getting started
 
 See the full documentation for setup instructions, API reference, deployment guide, and troubleshooting.
-
-done
-Done
