@@ -3,6 +3,9 @@
 
 A full-stack screen time tracker that monitors which apps you use, analyzes your Chrome browsing productivity, and helps you avoid developer burnout — all in real time.
 
+<img width="1150" height="801" alt="image" src="https://github.com/user-attachments/assets/f000c60f-b6d0-4837-aa21-b15635d1b163" />
+
+
 ## What it does
 
 Burnout Tracker runs a silent background agent on your laptop that tracks which applications you use and for how long. Every 60 seconds, it records your active window and sends it to a cloud backend. A live dashboard shows your screen time broken down by app, category, and hour — with Chrome-specific analysis that classifies your browsing as productive, unproductive, or neutral based on the sites you visit.
