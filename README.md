@@ -17,7 +17,6 @@ Burnout Tracker runs a silent background agent on your laptop that tracks which 
 - **Automation panel** — focus modes, alert rules, break reminders
 - **Session persistence** — data is stored in the cloud, no data lost between sessions
 - **Chrome Extension** — optional install for full tab tracking across all open windows
-- **Windows Tray App** — runs silently in the background with a system tray icon, auto-starts on login
 
 ## Tech stack
 
@@ -25,7 +24,6 @@ Burnout Tracker runs a silent background agent on your laptop that tracks which 
 - **Frontend** — Vanilla JavaScript, Chart.js (deployed on Vercel)
 - **Agent** — Python, Win32 API, psutil (runs locally on Windows)
 - **Chrome Extension** — Manifest V3, background service worker
-- **Tray App** — Python, pystray, PyInstaller (packaged as a standalone Windows EXE)
 
 ## How it works
 
